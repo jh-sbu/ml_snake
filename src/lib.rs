@@ -11,6 +11,4 @@ pub mod input;
 pub mod metrics;
 pub mod modes;
 pub mod render;
-
-// Future modules to be added in later phases:
-// pub mod rl;
+pub mod rl;
