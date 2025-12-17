@@ -1,5 +1,7 @@
 //! PPO algorithm hyperparameter configuration
 
+use serde::{Deserialize, Serialize};
+
 /// Configuration for the PPO (Proximal Policy Optimization) algorithm
 ///
 /// This struct contains all hyperparameters used by the PPO training algorithm.
@@ -20,7 +22,7 @@
 ///     ..Default::default()
 /// };
 /// ```
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PPOConfig {
     /// Learning rate for the Adam optimizer
     ///

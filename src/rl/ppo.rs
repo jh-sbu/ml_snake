@@ -39,7 +39,7 @@ use rand::Rng;
 /// let network = network_config.init::<Backend>(&device);
 /// let ppo_config = PPOConfig::default();
 ///
-/// let agent = PPOAgent::new(network, ppo_config, device);
+/// let agent = PPOAgent::new(network, ppo_config, 20, 20, device);
 /// ```
 pub struct PPOAgent<B: AutodiffBackend> {
     /// Actor-Critic neural network
@@ -56,6 +56,15 @@ pub struct PPOAgent<B: AutodiffBackend> {
 
     /// Training step counter
     training_step: usize,
+
+    /// Episode counter
+    episodes_trained: usize,
+
+    /// Grid height (for model persistence)
+    grid_height: usize,
+
+    /// Grid width (for model persistence)
+    grid_width: usize,
 
     /// Device for tensor operations
     device: B::Device,
@@ -83,9 +92,15 @@ impl<B: AutodiffBackend> PPOAgent<B> {
     /// let network = network_config.init::<Backend>(&device);
     /// let ppo_config = PPOConfig::default();
     ///
-    /// let agent = PPOAgent::new(network, ppo_config, device);
+    /// let agent = PPOAgent::new(network, ppo_config, 20, 20, device);
     /// ```
-    pub fn new(network: ActorCriticNetwork<B>, config: PPOConfig, device: B::Device) -> Self {
+    pub fn new(
+        network: ActorCriticNetwork<B>,
+        config: PPOConfig,
+        grid_height: usize,
+        grid_width: usize,
+        device: B::Device,
+    ) -> Self {
         // Validate config
         config
             .validate()
@@ -103,6 +118,9 @@ impl<B: AutodiffBackend> PPOAgent<B> {
             config,
             buffer,
             training_step: 0,
+            episodes_trained: 0,
+            grid_height,
+            grid_width,
             device,
         }
     }
@@ -369,6 +387,36 @@ impl<B: AutodiffBackend> PPOAgent<B> {
     pub fn training_step(&self) -> usize {
         self.training_step
     }
+
+    /// Get a reference to the neural network
+    pub fn network(&self) -> &ActorCriticNetwork<B> {
+        &self.network
+    }
+
+    /// Get a reference to the PPO configuration
+    pub fn config(&self) -> &PPOConfig {
+        &self.config
+    }
+
+    /// Get the grid height
+    pub fn grid_height(&self) -> usize {
+        self.grid_height
+    }
+
+    /// Get the grid width
+    pub fn grid_width(&self) -> usize {
+        self.grid_width
+    }
+
+    /// Get the number of episodes trained
+    pub fn episodes_trained(&self) -> usize {
+        self.episodes_trained
+    }
+
+    /// Increment the episode counter
+    pub fn increment_episode(&mut self) {
+        self.episodes_trained += 1;
+    }
 }
 
 /// Sample an action from a categorical distribution
@@ -420,7 +468,7 @@ mod tests {
         ppo_config.update_frequency = 128; // Smaller for tests
         ppo_config.batch_size = 32;
 
-        PPOAgent::new(network, ppo_config, device)
+        PPOAgent::new(network, ppo_config, 10, 10, device)
     }
 
     fn create_test_observation() -> Tensor<TestInferenceBackend, 3> {
@@ -485,7 +533,7 @@ mod tests {
         ppo_config.batch_size = 16;
         ppo_config.n_epochs = 2; // Fewer epochs for speed
 
-        let mut agent = PPOAgent::new(network, ppo_config, device);
+        let mut agent = PPOAgent::new(network, ppo_config, 10, 10, device);
 
         // Fill buffer
         for _ in 0..32 {
@@ -572,7 +620,7 @@ mod tests {
         ppo_config.update_frequency = 32;
         ppo_config.batch_size = 16;
 
-        let mut agent = PPOAgent::new(network, ppo_config, device);
+        let mut agent = PPOAgent::new(network, ppo_config, 10, 10, device);
 
         // Collect some transitions
         let mut obs = env.reset();
