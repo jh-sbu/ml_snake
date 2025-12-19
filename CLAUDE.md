@@ -82,3 +82,67 @@ cargo run -- --mode train --episodes 10000 --save-path models/snake.bin
 # Visualization mode - watch trained agent play
 cargo run -- --mode visualize --model-path models/snake.bin
 ```
+
+## GPU Support
+
+The project supports both CPU (NdArray) and GPU (Wgpu) backends for accelerated training and inference.
+
+### Backend Selection
+
+```bash
+# Auto-detect best available backend (default)
+cargo run --release -- --mode train --episodes 10000
+
+# Explicitly use CPU backend
+cargo run --release -- --mode train --backend cpu --episodes 10000
+
+# Explicitly use GPU backend (requires compatible GPU and drivers)
+cargo run --release -- --mode train --backend gpu --episodes 10000
+
+# Use specific GPU device (multi-GPU systems)
+cargo run --release -- --mode train --backend gpu --gpu-device 0
+```
+
+### Backend Features
+
+**CPU Backend (NdArray)**
+- Works on all systems
+- No additional dependencies
+- Optimized batch size: 32
+- Update frequency: 2048 steps
+
+**GPU Backend (Wgpu)**
+- Cross-platform GPU support (NVIDIA, AMD, Intel)
+- Requires up-to-date graphics drivers
+- Requires Vulkan (Linux/Windows), Metal (macOS), or DirectX 12 (Windows)
+- Optimized batch size: 256 (8x larger for better GPU utilization)
+- Update frequency: 4096 steps (2x larger)
+- Expected speedup: 3-6x faster training
+
+### Cross-Backend Compatibility
+
+Models trained on one backend can be loaded on any other backend:
+```bash
+# Train on CPU
+cargo run --release -- --mode train --backend cpu --save-path models/cpu_model.bin --episodes 1000
+
+# Visualize on GPU
+cargo run --release -- --mode visualize --backend gpu --model-path models/cpu_model.bin
+
+# Train on GPU
+cargo run --release -- --mode train --backend gpu --save-path models/gpu_model.bin --episodes 1000
+
+# Visualize on CPU
+cargo run --release -- --mode visualize --backend cpu --model-path models/gpu_model.bin
+```
+
+### GPU Requirements
+
+To use the GPU backend, ensure you have:
+- **NVIDIA GPUs**: Latest NVIDIA drivers with Vulkan support
+- **AMD GPUs**: Latest AMD drivers with Vulkan support (amdgpu/amdvlk)
+- **Intel GPUs**: Latest Intel drivers with Vulkan support
+- **macOS**: Metal support (built-in on modern macOS)
+- **Windows**: DirectX 12 or Vulkan support
+
+If GPU is not available or initialization fails, the auto-detection will gracefully fall back to CPU.

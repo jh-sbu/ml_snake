@@ -6,6 +6,8 @@
 //! - RL training infrastructure (rl module) - to be implemented
 //! - Multiple execution modes (human, train, visualize) - to be implemented
 
+#![recursion_limit = "256"]
+
 pub mod game;
 pub mod input;
 pub mod metrics;

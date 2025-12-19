@@ -17,7 +17,7 @@ pub mod observation;
 pub mod persistence;
 pub mod ppo;
 
-pub use backend::{InferenceBackend, TrainingBackend, default_device};
+pub use backend::{InferenceBackend, TrainingBackend, cpu, gpu, default_device, gpu_available};
 pub use buffer::RolloutBuffer;
 pub use config::PPOConfig;
 pub use environment::SnakeEnvironment;
