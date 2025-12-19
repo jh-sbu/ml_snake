@@ -28,8 +28,8 @@
 
 use anyhow::{Context, Result};
 use burn::tensor::backend::AutodiffBackend;
-use std::iter::repeat;
 use std::path::{Path, PathBuf};
+use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
 use crate::game::GameConfig;
 use crate::metrics::TrainingStats;
@@ -51,6 +51,9 @@ pub struct TrainConfig {
 
     /// Log training progress every N episodes
     pub log_frequency: usize,
+
+    /// Maximum steps per episode (prevents infinite loops)
+    pub max_steps_per_episode: usize,
 
     /// Game configuration (grid size, rewards)
     pub game_config: GameConfig,
@@ -81,6 +84,7 @@ impl TrainConfig {
             save_path,
             checkpoint_frequency: 1000,
             log_frequency: 100,
+            max_steps_per_episode: 1000,
             game_config: GameConfig::default(),
             ppo_config: PPOConfig::default(),
         }
@@ -109,6 +113,9 @@ pub struct TrainMode<B: AutodiffBackend> {
 
     /// Total steps across all episodes
     total_steps: usize,
+
+    /// Training start time (for elapsed time calculation)
+    start_time: Instant,
 }
 
 impl<B: AutodiffBackend> TrainMode<B> {
@@ -159,6 +166,7 @@ impl<B: AutodiffBackend> TrainMode<B> {
             config,
             current_episode: 0,
             total_steps: 0,
+            start_time: Instant::now(),
         }
     }
 
@@ -207,10 +215,17 @@ impl<B: AutodiffBackend> TrainMode<B> {
         // Final save
         self.save_model()?;
 
-        println!("\nTraining complete!");
+        let timestamp = Self::format_timestamp();
+        let elapsed = Self::format_elapsed_time(self.start_time.elapsed());
+
+        println!("\n{}", "=".repeat(70));
+        println!("Training Complete!");
+        println!("{}", "=".repeat(70));
+        println!("[{}] [Total Elapsed: {}]", timestamp, elapsed);
         println!("Final model saved to: {:?}", self.config.save_path);
         println!("\nFinal Statistics:");
         println!("{}", self.stats.format_summary());
+        println!("{}", "=".repeat(70));
 
         Ok(())
     }
@@ -219,6 +234,10 @@ impl<B: AutodiffBackend> TrainMode<B> {
     ///
     /// Collects experiences by running the agent in the environment, storing
     /// transitions in the buffer. When the buffer is full, performs PPO updates.
+    ///
+    /// Episodes terminate when:
+    /// - The snake dies (wall/self collision)
+    /// - Maximum steps per episode is reached (prevents infinite loops)
     ///
     /// # Returns
     ///
@@ -232,7 +251,7 @@ impl<B: AutodiffBackend> TrainMode<B> {
         let mut episode_steps = 0;
         let mut done = false;
 
-        while !done {
+        while !done && episode_steps < self.config.max_steps_per_episode {
             // Select action
             let (action, log_prob, value) = self.agent.select_action(obs.clone());
 
@@ -312,6 +331,7 @@ impl<B: AutodiffBackend> TrainMode<B> {
             "Game Config: {}x{} grid",
             self.config.game_config.grid_width, self.config.game_config.grid_height
         );
+        println!("Max steps per episode: {}", self.config.max_steps_per_episode);
         println!("PPO Config:");
         println!("  Learning rate: {}", self.config.ppo_config.learning_rate);
         println!("  Gamma: {}", self.config.ppo_config.gamma);
@@ -332,12 +352,41 @@ impl<B: AutodiffBackend> TrainMode<B> {
 
     /// Print training progress
     fn print_progress(&self, episode: usize) {
+        let timestamp = Self::format_timestamp();
+        let elapsed = Self::format_elapsed_time(self.start_time.elapsed());
+
         println!(
-            "[Episode {}/{}] {}",
+            "[{}] [Elapsed: {}] [Episode {}/{}] {}",
+            timestamp,
+            elapsed,
             episode,
             self.config.num_episodes,
             self.stats.format_summary()
         );
+    }
+
+    /// Format current timestamp as HH:MM:SS
+    fn format_timestamp() -> String {
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default();
+
+        let total_seconds = now.as_secs();
+        let hours = (total_seconds / 3600) % 24;
+        let minutes = (total_seconds / 60) % 60;
+        let seconds = total_seconds % 60;
+
+        format!("{:02}:{:02}:{:02}", hours, minutes, seconds)
+    }
+
+    /// Format elapsed time as HH:MM:SS
+    fn format_elapsed_time(duration: std::time::Duration) -> String {
+        let total_seconds = duration.as_secs();
+        let hours = total_seconds / 3600;
+        let minutes = (total_seconds / 60) % 60;
+        let seconds = total_seconds % 60;
+
+        format!("{:02}:{:02}:{:02}", hours, minutes, seconds)
     }
 }
 

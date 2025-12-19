@@ -38,6 +38,10 @@ struct Cli {
     #[arg(long, default_value = "100")]
     log_freq: usize,
 
+    /// Maximum steps per episode - prevents infinite loops (train mode only)
+    #[arg(long, default_value = "1000")]
+    max_steps: usize,
+
     // Visualization mode arguments
     /// Path to trained model (visualize mode only)
     #[arg(long, default_value = "models/snake.bin")]
@@ -72,6 +76,7 @@ async fn main() -> Result<()> {
             let mut train_config = TrainConfig::new(cli.episodes, cli.save_path);
             train_config.checkpoint_frequency = cli.checkpoint_freq;
             train_config.log_frequency = cli.log_freq;
+            train_config.max_steps_per_episode = cli.max_steps;
             train_config.game_config = config;
             train_config.ppo_config = PPOConfig::default();
 
