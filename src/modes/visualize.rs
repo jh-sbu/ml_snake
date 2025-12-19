@@ -45,15 +45,36 @@ use futures::StreamExt;
 use ratatui::{backend::CrosstermBackend, Terminal};
 use std::{
     io::{stderr, Stderr},
-    iter::repeat,
     path::Path,
     time::Duration,
 };
 use tokio::time::{interval, Interval};
 
 use crate::game::GameConfig;
-use crate::render::Renderer;
 use crate::rl::{load_network, ActorCriticNetwork, ModelMetadata, SnakeEnvironment};
+
+/// Agent decision information for visualization
+#[derive(Debug, Clone)]
+pub struct AgentInfo {
+    /// Action probabilities [Up, Down, Left, Right]
+    pub action_probs: [f32; 4],
+
+    /// Critic's value estimate for current state
+    pub value: f32,
+
+    /// Index of chosen action (0-3)
+    pub chosen_action: usize,
+}
+
+impl Default for AgentInfo {
+    fn default() -> Self {
+        Self {
+            action_probs: [0.25, 0.25, 0.25, 0.25],
+            value: 0.0,
+            chosen_action: 0,
+        }
+    }
+}
 
 /// Visualization speed settings
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -98,9 +119,6 @@ pub struct VisualizeMode<B: Backend> {
     /// Snake environment
     env: SnakeEnvironment<B>,
 
-    /// Renderer for TUI display
-    renderer: Renderer,
-
     /// Model metadata
     metadata: ModelMetadata,
 
@@ -115,6 +133,9 @@ pub struct VisualizeMode<B: Backend> {
 
     /// Number of episodes completed
     episode_count: usize,
+
+    /// Current agent decision info (for rendering)
+    agent_info: AgentInfo,
 }
 
 impl<B: Backend> VisualizeMode<B> {
@@ -178,12 +199,12 @@ impl<B: Backend> VisualizeMode<B> {
         Ok(Self {
             network,
             env,
-            renderer: Renderer::new(),
             metadata,
             should_quit: false,
             paused: false,
             speed: VisualizationSpeed::Normal,
             episode_count: 0,
+            agent_info: AgentInfo::default(),
         })
     }
 
@@ -249,6 +270,7 @@ impl<B: Backend> VisualizeMode<B> {
                             obs = self.env.reset();
                             done = false;
                             self.episode_count += 1;
+                            self.agent_info = AgentInfo::default();
                         } else {
                             // Step agent
                             obs = self.step_agent(obs)?;
@@ -281,17 +303,35 @@ impl<B: Backend> VisualizeMode<B> {
     /// Step the agent forward one action
     ///
     /// Uses the trained network to select an action (greedy policy) and steps
-    /// the environment.
+    /// the environment. Also extracts and stores agent decision info for rendering.
     fn step_agent(&mut self, obs: Tensor<B, 3>) -> Result<Tensor<B, 3>> {
         // Add batch dimension
         let obs_batch = obs.unsqueeze_dim(0); // [1, 4, H, W]
 
-        // Forward pass
-        let (action_logits, _value) = self.network.forward(obs_batch);
+        // Forward pass (DON'T discard value!)
+        let (action_logits, value) = self.network.forward(obs_batch);
 
-        // Select best action (argmax of probabilities)
-        let action_probs = softmax(action_logits, 1);
+        // Compute action probabilities
+        let action_probs = softmax(action_logits.clone(), 1);
         let action_idx = argmax_action(&action_probs);
+
+        // Extract data for rendering (convert Backend tensors to f32)
+        let probs_data = action_probs.to_data();
+        let probs_vec: Vec<f32> = probs_data
+            .to_vec()
+            .expect("Failed to convert action probs to vec");
+
+        let value_data = value.to_data();
+        let value_vec: Vec<f32> = value_data
+            .to_vec()
+            .expect("Failed to convert value to vec");
+
+        // Store agent info for rendering
+        self.agent_info = AgentInfo {
+            action_probs: [probs_vec[0], probs_vec[1], probs_vec[2], probs_vec[3]],
+            value: value_vec[0],
+            chosen_action: action_idx,
+        };
 
         // Step environment
         let (next_obs, _reward, _done) = self.env.step(action_idx);
@@ -318,6 +358,7 @@ impl<B: Backend> VisualizeMode<B> {
                     // Manual reset
                     self.env.reset();
                     self.episode_count += 1;
+                    self.agent_info = AgentInfo::default();
                 }
                 KeyCode::Char('1') => {
                     self.change_speed(VisualizationSpeed::Slow, tick_timer);
@@ -344,23 +385,320 @@ impl<B: Backend> VisualizeMode<B> {
         tick_timer.reset_after(self.speed.tick_interval());
     }
 
-    /// Render the current frame
+    /// Render the current frame with agent insights
     fn render_frame(&self, frame: &mut ratatui::Frame) {
-        // Use existing renderer for game state
-        // Note: This uses a dummy metrics object since we're not tracking human play metrics
-        use crate::metrics::GameMetrics;
-        let dummy_metrics = GameMetrics::new();
+        use ratatui::layout::{Constraint, Direction, Layout};
 
-        self.renderer.render(frame, self.env.state(), &dummy_metrics);
+        // Main layout: Header | Body | Footer
+        let main_chunks = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([
+                Constraint::Length(3), // Header
+                Constraint::Min(0),    // Body
+                Constraint::Length(3), // Footer
+            ])
+            .split(frame.area());
 
-        // TODO: Add visualization-specific overlays:
-        // - "VISUALIZE MODE" indicator
-        // - Episode counter
-        // - Speed setting
-        // - Pause indicator
-        // - Controls help text
-        //
-        // This can be done by extending the Renderer or creating overlay widgets
+        // Render header with visualization info
+        self.render_viz_header(main_chunks[0], frame);
+
+        // Body layout: Game (70%) | Sidebar (30%)
+        let body_chunks = Layout::default()
+            .direction(Direction::Horizontal)
+            .constraints([
+                Constraint::Percentage(70), // Game area
+                Constraint::Percentage(30), // Sidebar
+            ])
+            .split(main_chunks[1]);
+
+        // Render game grid
+        let grid_widget = self.render_grid_widget();
+        frame.render_widget(grid_widget, body_chunks[0]);
+
+        // Sidebar layout: Agent Info (60%) | Model Info (40%)
+        let sidebar_chunks = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([
+                Constraint::Percentage(60), // Agent decision
+                Constraint::Percentage(40), // Model info
+            ])
+            .split(body_chunks[1]);
+
+        // Render sidebar sections
+        self.render_agent_info(sidebar_chunks[0], frame);
+        self.render_model_info(sidebar_chunks[1], frame);
+
+        // Render footer with controls
+        self.render_viz_controls(main_chunks[2], frame);
+    }
+
+    /// Render enhanced header with visualization mode info
+    fn render_viz_header(&self, area: ratatui::layout::Rect, frame: &mut ratatui::Frame) {
+        use ratatui::layout::Alignment;
+        use ratatui::style::{Color, Modifier, Style};
+        use ratatui::text::{Line, Span};
+        use ratatui::widgets::{Block, Borders, Paragraph};
+
+        // Build status line
+        let mode_indicator = Span::styled(
+            "VISUALIZE MODE",
+            Style::default()
+                .fg(Color::Cyan)
+                .add_modifier(Modifier::BOLD),
+        );
+
+        let episode_info = Span::styled(
+            format!(" | Episode: {} ", self.episode_count),
+            Style::default().fg(Color::Yellow),
+        );
+
+        let speed_info = Span::styled(
+            format!(" | Speed: {} ", self.speed.as_str()),
+            Style::default().fg(Color::Green),
+        );
+
+        let pause_indicator = if self.paused {
+            Span::styled(
+                " | PAUSED",
+                Style::default()
+                    .fg(Color::Red)
+                    .add_modifier(Modifier::BOLD),
+            )
+        } else {
+            Span::raw("")
+        };
+
+        let header = Paragraph::new(Line::from(vec![
+            mode_indicator,
+            episode_info,
+            speed_info,
+            pause_indicator,
+        ]))
+        .alignment(Alignment::Center)
+        .block(
+            Block::default()
+                .borders(Borders::BOTTOM)
+                .border_style(Style::default().fg(Color::DarkGray)),
+        );
+
+        frame.render_widget(header, area);
+    }
+
+    /// Render agent decision info sidebar
+    fn render_agent_info(&self, area: ratatui::layout::Rect, frame: &mut ratatui::Frame) {
+        use ratatui::style::{Color, Modifier, Style};
+        use ratatui::text::{Line, Span};
+        use ratatui::widgets::{Block, BorderType, Borders, Paragraph};
+
+        // Value estimate with context
+        let (value_color, value_label) = if self.agent_info.value > 10.0 {
+            (Color::Green, "Good")
+        } else if self.agent_info.value > 0.0 {
+            (Color::Yellow, "Okay")
+        } else {
+            (Color::Red, "Poor")
+        };
+
+        let value_line = Line::from(vec![
+            Span::styled("Value: ", Style::default().fg(Color::Gray)),
+            Span::styled(
+                format!("{:+.1}", self.agent_info.value),
+                Style::default()
+                    .fg(value_color)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(
+                format!(" [{}]", value_label),
+                Style::default().fg(value_color),
+            ),
+        ]);
+
+        // Action probabilities with bars
+        let action_names = ["↑ Up:   ", "↓ Down: ", "← Left: ", "→ Right:"];
+        let mut lines = vec![
+            value_line,
+            Line::from(""),
+            Line::styled(
+                "Action Probabilities:",
+                Style::default()
+                    .fg(Color::Cyan)
+                    .add_modifier(Modifier::BOLD),
+            ),
+        ];
+
+        for (idx, (name, &prob)) in action_names
+            .iter()
+            .zip(self.agent_info.action_probs.iter())
+            .enumerate()
+        {
+            let is_chosen = idx == self.agent_info.chosen_action;
+            let color = if is_chosen { Color::Green } else { Color::Gray };
+
+            // Create bar chart (10 chars = 100%)
+            let filled = ((prob * 10.0).round() as usize).min(10);
+            let empty = 10 - filled;
+            let bar = format!("{}{}", "█".repeat(filled), "░".repeat(empty));
+
+            let check = if is_chosen { " ✓" } else { "" };
+
+            lines.push(Line::from(vec![
+                Span::styled(*name, Style::default().fg(color)),
+                Span::styled(bar, Style::default().fg(color)),
+                Span::styled(
+                    format!(" {:3.0}%{}", prob * 100.0, check),
+                    Style::default().fg(color),
+                ),
+            ]));
+        }
+
+        let widget = Paragraph::new(lines).block(
+            Block::default()
+                .borders(Borders::ALL)
+                .border_type(BorderType::Rounded)
+                .border_style(Style::default().fg(Color::Cyan))
+                .title(" Agent Decision "),
+        );
+
+        frame.render_widget(widget, area);
+    }
+
+    /// Render model metadata info
+    fn render_model_info(&self, area: ratatui::layout::Rect, frame: &mut ratatui::Frame) {
+        use ratatui::style::{Color, Style};
+        use ratatui::text::{Line, Span};
+        use ratatui::widgets::{Block, BorderType, Borders, Paragraph};
+
+        let lines = vec![
+            Line::from(vec![
+                Span::styled("Episodes: ", Style::default().fg(Color::Gray)),
+                Span::styled(
+                    format!("{}", self.metadata.episodes_trained),
+                    Style::default().fg(Color::White),
+                ),
+            ]),
+            Line::from(vec![
+                Span::styled("Steps: ", Style::default().fg(Color::Gray)),
+                Span::styled(
+                    format!("{}", self.metadata.training_steps),
+                    Style::default().fg(Color::White),
+                ),
+            ]),
+            Line::from(vec![
+                Span::styled("Grid: ", Style::default().fg(Color::Gray)),
+                Span::styled(
+                    format!("{}x{}", self.metadata.grid_width, self.metadata.grid_height),
+                    Style::default().fg(Color::White),
+                ),
+            ]),
+        ];
+
+        let widget = Paragraph::new(lines).block(
+            Block::default()
+                .borders(Borders::ALL)
+                .border_type(BorderType::Rounded)
+                .border_style(Style::default().fg(Color::Yellow))
+                .title(" Model Info "),
+        );
+
+        frame.render_widget(widget, area);
+    }
+
+    /// Render visualization-specific controls
+    fn render_viz_controls(&self, area: ratatui::layout::Rect, frame: &mut ratatui::Frame) {
+        use ratatui::layout::Alignment;
+        use ratatui::style::{Color, Style};
+        use ratatui::text::{Line, Span};
+        use ratatui::widgets::Paragraph;
+
+        let text = vec![Line::from(vec![
+            Span::styled("SPACE", Style::default().fg(Color::Cyan)),
+            Span::raw("=Pause | "),
+            Span::styled("R", Style::default().fg(Color::Cyan)),
+            Span::raw("=Reset | "),
+            Span::styled("1-4", Style::default().fg(Color::Cyan)),
+            Span::raw("=Speed | "),
+            Span::styled("Q", Style::default().fg(Color::Red)),
+            Span::raw("=Quit"),
+        ])];
+
+        let widget = Paragraph::new(text).alignment(Alignment::Center);
+        frame.render_widget(widget, area);
+    }
+
+    /// Create grid widget (extracted from Renderer for inline use)
+    fn render_grid_widget(&self) -> ratatui::widgets::Paragraph<'static> {
+        use crate::game::Position;
+        use ratatui::layout::Alignment;
+        use ratatui::style::{Color, Modifier, Style};
+        use ratatui::text::{Line, Span};
+        use ratatui::widgets::{Block, BorderType, Borders, Paragraph};
+
+        let state = self.env.state();
+        let mut lines = Vec::new();
+
+        // Add score at top
+        let score_line = Line::from(vec![
+            Span::styled("Score: ", Style::default().fg(Color::Yellow)),
+            Span::styled(
+                state.score.to_string(),
+                Style::default()
+                    .fg(Color::White)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::raw("  "),
+            Span::styled("Steps: ", Style::default().fg(Color::Yellow)),
+            Span::styled(state.steps.to_string(), Style::default().fg(Color::White)),
+        ]);
+
+        lines.push(score_line);
+        lines.push(Line::from(""));
+
+        // Render grid
+        for y in 0..state.grid_height {
+            let mut spans = Vec::new();
+
+            for x in 0..state.grid_width {
+                let pos = Position::new(x as i32, y as i32);
+
+                let cell = if pos == state.snake.head() {
+                    // Snake head
+                    Span::styled(
+                        "■ ",
+                        Style::default()
+                            .fg(Color::Cyan)
+                            .add_modifier(Modifier::BOLD),
+                    )
+                } else if state.snake.body.contains(&pos) {
+                    // Snake body
+                    Span::styled("□ ", Style::default().fg(Color::Green))
+                } else if pos == state.food {
+                    // Food
+                    Span::styled(
+                        "O ",
+                        Style::default()
+                            .fg(Color::Red)
+                            .add_modifier(Modifier::BOLD),
+                    )
+                } else {
+                    // Empty cell
+                    Span::styled(". ", Style::default().fg(Color::DarkGray))
+                };
+
+                spans.push(cell);
+            }
+
+            lines.push(Line::from(spans));
+        }
+
+        Paragraph::new(lines)
+            .block(
+                Block::default()
+                    .borders(Borders::ALL)
+                    .border_type(BorderType::Double)
+                    .border_style(Style::default().fg(Color::White))
+                    .title(" Snake Game "),
+            )
+            .alignment(Alignment::Center)
     }
 
     /// Cleanup terminal state
