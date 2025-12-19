@@ -4,7 +4,7 @@
 //! environment interaction and computing advantages using Generalized Advantage
 //! Estimation (GAE).
 
-use burn::tensor::{Int, Tensor, backend::Backend};
+use burn::tensor::{Int, Tensor, TensorData, backend::Backend};
 use rand::seq::SliceRandom;
 
 /// Experience buffer for storing rollout data during PPO training
@@ -296,11 +296,11 @@ impl<B: Backend> RolloutBuffer<B> {
         &self,
         indices: &[usize],
     ) -> (
-        Tensor<B, 4>,
-        Tensor<B, 1, Int>,
-        Tensor<B, 1>,
-        Tensor<B, 1>,
-        Tensor<B, 1>,
+        TensorData,  // observations [batch, 4, H, W]
+        TensorData,  // actions [batch] (Int type)
+        TensorData,  // old_log_probs [batch]
+        TensorData,  // advantages [batch]
+        TensorData,  // returns [batch]
     ) {
         let advantages = self
             .advantages
@@ -321,13 +321,13 @@ impl<B: Backend> RolloutBuffer<B> {
             .map(|&i| self.observations[i].clone())
             .collect();
 
-        let obs_tensor = if !obs_batch.is_empty() {
+        let obs_tensor: Tensor<B, 4> = if !obs_batch.is_empty() {
             // Start with first observation as [1, channels, height, width]
-            let mut current = obs_batch[0].clone().unsqueeze_dim(0);
+            let mut current: Tensor<B, 4> = obs_batch[0].clone().unsqueeze_dim(0);
 
             // Iteratively concatenate each subsequent observation along batch dimension
             for obs in obs_batch.iter().skip(1) {
-                let obs_batch_item = obs.clone().unsqueeze_dim(0);
+                let obs_batch_item: Tensor<B, 4> = obs.clone().unsqueeze_dim(0);
                 current = Tensor::cat(vec![current, obs_batch_item], 0);
             }
 
@@ -342,22 +342,22 @@ impl<B: Backend> RolloutBuffer<B> {
 
         // Create log_probs tensor
         let log_probs_data: Vec<f32> = indices.iter().map(|&i| self.log_probs[i]).collect();
-        let log_probs_tensor = Tensor::from_floats(log_probs_data.as_slice(), &self.device);
+        let log_probs_tensor: Tensor<B, 1> = Tensor::from_floats(log_probs_data.as_slice(), &self.device);
 
         // Create advantages tensor
         let advantages_data: Vec<f32> = indices.iter().map(|&i| advantages[i]).collect();
-        let advantages_tensor = Tensor::from_floats(advantages_data.as_slice(), &self.device);
+        let advantages_tensor: Tensor<B, 1> = Tensor::from_floats(advantages_data.as_slice(), &self.device);
 
         // Create returns tensor
         let returns_data: Vec<f32> = indices.iter().map(|&i| returns[i]).collect();
-        let returns_tensor = Tensor::from_floats(returns_data.as_slice(), &self.device);
+        let returns_tensor: Tensor<B, 1> = Tensor::from_floats(returns_data.as_slice(), &self.device);
 
         (
-            obs_tensor,
-            actions_tensor,
-            log_probs_tensor,
-            advantages_tensor,
-            returns_tensor,
+            obs_tensor.into_data(),
+            actions_tensor.into_data(),
+            log_probs_tensor.into_data(),
+            advantages_tensor.into_data(),
+            returns_tensor.into_data(),
         )
     }
 
@@ -637,7 +637,15 @@ mod tests {
         buffer.compute_advantages(0.99, 0.95, 0.5, false);
 
         let indices = vec![0, 1, 2];
-        let (obs, actions, log_probs, advantages, returns) = buffer.get_batch(&indices);
+        let (obs_data, actions_data, log_probs_data, advantages_data, returns_data) =
+            buffer.get_batch(&indices);
+
+        // Reconstruct tensors from TensorData for assertions
+        let obs: Tensor<TestBackend, 4> = Tensor::from_data(obs_data, &device);
+        let actions: Tensor<TestBackend, 1, Int> = Tensor::from_data(actions_data, &device);
+        let log_probs: Tensor<TestBackend, 1> = Tensor::from_data(log_probs_data, &device);
+        let advantages: Tensor<TestBackend, 1> = Tensor::from_data(advantages_data, &device);
+        let returns: Tensor<TestBackend, 1> = Tensor::from_data(returns_data, &device);
 
         // Check shapes
         assert_eq!(obs.dims(), [3, 4, 10, 10]); // [batch, channels, H, W]
@@ -702,8 +710,16 @@ mod tests {
         let indices: Vec<usize> = (0..batch_size).collect();
 
         let start = std::time::Instant::now();
-        let (obs, actions, log_probs, advantages, returns) = buffer.get_batch(&indices);
+        let (obs_data, actions_data, log_probs_data, advantages_data, returns_data) =
+            buffer.get_batch(&indices);
         let elapsed = start.elapsed();
+
+        // Reconstruct tensors from TensorData for assertions
+        let obs: Tensor<TestBackend, 4> = Tensor::from_data(obs_data, &device);
+        let actions: Tensor<TestBackend, 1, Int> = Tensor::from_data(actions_data, &device);
+        let log_probs: Tensor<TestBackend, 1> = Tensor::from_data(log_probs_data, &device);
+        let advantages: Tensor<TestBackend, 1> = Tensor::from_data(advantages_data, &device);
+        let returns: Tensor<TestBackend, 1> = Tensor::from_data(returns_data, &device);
 
         // Verify correctness
         assert_eq!(obs.dims(), [batch_size, 4, 10, 10]);
@@ -740,8 +756,12 @@ mod tests {
         let indices: Vec<usize> = (0..batch_size).collect();
 
         let start = std::time::Instant::now();
-        let (obs, _actions, _log_probs, _advantages, _returns) = buffer.get_batch(&indices);
+        let (obs_data, _actions_data, _log_probs_data, _advantages_data, _returns_data) =
+            buffer.get_batch(&indices);
         let elapsed = start.elapsed();
+
+        // Reconstruct observation tensor from TensorData for assertions
+        let obs: Tensor<TestBackend, 4> = Tensor::from_data(obs_data, &device);
 
         // Verify dimensions are correct
         assert_eq!(obs.dims(), [batch_size, 4, 10, 10]);

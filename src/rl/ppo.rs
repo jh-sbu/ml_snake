@@ -238,24 +238,16 @@ impl<B: AutodiffBackend> PPOAgent<B> {
             let batch_indices = self.buffer.sample_indices(self.config.batch_size);
 
             for indices in batch_indices {
-                let (obs, actions, old_log_probs, advantages, returns) =
+                // Get batch data from buffer (TensorData format)
+                let (obs_data, actions_data, old_log_probs_data, advantages_data, returns_data) =
                     self.buffer.get_batch(&indices);
 
-                // Convert tensors to autodiff backend
-                let obs_data = obs.to_data();
+                // Construct tensors directly on autodiff backend
                 let obs: Tensor<B, 4> = Tensor::from_data(obs_data, &self.device);
-
-                let actions_data = actions.to_data();
                 let actions: Tensor<B, 1, Int> = Tensor::from_data(actions_data, &self.device);
-
-                let old_log_probs_data = old_log_probs.to_data();
                 let old_log_probs: Tensor<B, 1> =
                     Tensor::from_data(old_log_probs_data, &self.device);
-
-                let advantages_data = advantages.to_data();
                 let advantages: Tensor<B, 1> = Tensor::from_data(advantages_data, &self.device);
-
-                let returns_data = returns.to_data();
                 let returns: Tensor<B, 1> = Tensor::from_data(returns_data, &self.device);
 
                 // Forward pass
