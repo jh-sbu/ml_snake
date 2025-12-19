@@ -2,7 +2,7 @@ use anyhow::Result;
 use clap::{Parser, ValueEnum};
 use ml_snake::game::GameConfig;
 use ml_snake::modes::{HumanMode, TrainConfig, TrainMode, VisualizeMode};
-use ml_snake::rl::{default_device, InferenceBackend, PPOConfig, TrainingBackend};
+use ml_snake::rl::{InferenceBackend, PPOConfig, TrainingBackend, default_device};
 use std::path::PathBuf;
 
 #[derive(Parser)]

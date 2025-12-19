@@ -17,11 +17,11 @@ pub mod observation;
 pub mod persistence;
 pub mod ppo;
 
-pub use backend::{default_device, InferenceBackend, TrainingBackend};
+pub use backend::{InferenceBackend, TrainingBackend, default_device};
 pub use buffer::RolloutBuffer;
 pub use config::PPOConfig;
 pub use environment::SnakeEnvironment;
 pub use network::{ActorCriticConfig, ActorCriticNetwork};
 pub use observation::create_observation;
-pub use persistence::{load_network, save_model, ModelMetadata};
+pub use persistence::{ModelMetadata, load_network, save_model};
 pub use ppo::PPOAgent;

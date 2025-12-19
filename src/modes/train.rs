@@ -33,9 +33,7 @@ use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
 use crate::game::GameConfig;
 use crate::metrics::TrainingStats;
-use crate::rl::{
-    save_model, ActorCriticConfig, PPOAgent, PPOConfig, SnakeEnvironment,
-};
+use crate::rl::{ActorCriticConfig, PPOAgent, PPOConfig, SnakeEnvironment, save_model};
 
 /// Configuration for training mode
 #[derive(Debug, Clone)]
@@ -279,8 +277,7 @@ impl<B: AutodiffBackend> TrainMode<B> {
                     self.agent.update(last_value, done);
 
                 // Record training metrics
-                self.stats
-                    .record_update(policy_loss, value_loss, entropy);
+                self.stats.record_update(policy_loss, value_loss, entropy);
             }
         }
 
@@ -296,10 +293,7 @@ impl<B: AutodiffBackend> TrainMode<B> {
             .save_path
             .parent()
             .unwrap_or(Path::new("."))
-            .join(format!(
-                "checkpoint_ep{}.bin",
-                self.current_episode + 1
-            ));
+            .join(format!("checkpoint_ep{}.bin", self.current_episode + 1));
 
         save_model(&self.agent, &checkpoint_path)
             .with_context(|| format!("Failed to save checkpoint to {:?}", checkpoint_path))?;
@@ -312,10 +306,7 @@ impl<B: AutodiffBackend> TrainMode<B> {
     /// Save the final trained model
     fn save_model(&self) -> Result<()> {
         save_model(&self.agent, &self.config.save_path).with_context(|| {
-            format!(
-                "Failed to save final model to {:?}",
-                self.config.save_path
-            )
+            format!("Failed to save final model to {:?}", self.config.save_path)
         })?;
 
         Ok(())
@@ -331,7 +322,10 @@ impl<B: AutodiffBackend> TrainMode<B> {
             "Game Config: {}x{} grid",
             self.config.game_config.grid_width, self.config.game_config.grid_height
         );
-        println!("Max steps per episode: {}", self.config.max_steps_per_episode);
+        println!(
+            "Max steps per episode: {}",
+            self.config.max_steps_per_episode
+        );
         println!("PPO Config:");
         println!("  Learning rate: {}", self.config.ppo_config.learning_rate);
         println!("  Gamma: {}", self.config.ppo_config.gamma);
@@ -343,7 +337,10 @@ impl<B: AutodiffBackend> TrainMode<B> {
         );
         println!("  Batch size: {}", self.config.ppo_config.batch_size);
         println!("  Epochs per update: {}", self.config.ppo_config.n_epochs);
-        println!("Checkpoints: Every {} episodes", self.config.checkpoint_frequency);
+        println!(
+            "Checkpoints: Every {} episodes",
+            self.config.checkpoint_frequency
+        );
         println!("Logging: Every {} episodes", self.config.log_frequency);
         println!("Save path: {:?}", self.config.save_path);
         println!("{}", "=".repeat(70));
@@ -393,7 +390,7 @@ impl<B: AutodiffBackend> TrainMode<B> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::rl::{default_device, TrainingBackend};
+    use crate::rl::{TrainingBackend, default_device};
     use tempfile::TempDir;
 
     #[test]

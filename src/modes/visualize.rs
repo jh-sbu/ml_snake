@@ -31,27 +31,23 @@
 
 use anyhow::{Context, Result};
 use burn::module::AutodiffModule;
-use burn::tensor::{
-    activation::softmax,
-    backend::Backend,
-    Tensor,
-};
+use burn::tensor::{Tensor, activation::softmax, backend::Backend};
 use crossterm::{
     event::{Event, EventStream, KeyCode, KeyEventKind},
     execute,
-    terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
+    terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
 };
 use futures::StreamExt;
-use ratatui::{backend::CrosstermBackend, Terminal};
+use ratatui::{Terminal, backend::CrosstermBackend};
 use std::{
-    io::{stderr, Stderr},
+    io::{Stderr, stderr},
     path::Path,
     time::Duration,
 };
-use tokio::time::{interval, Interval};
+use tokio::time::{Interval, interval};
 
 use crate::game::GameConfig;
-use crate::rl::{load_network, ActorCriticNetwork, ModelMetadata, SnakeEnvironment};
+use crate::rl::{ActorCriticNetwork, ModelMetadata, SnakeEnvironment, load_network};
 
 /// Agent decision information for visualization
 #[derive(Debug, Clone)]
@@ -186,7 +182,10 @@ impl<B: Backend> VisualizeMode<B> {
         println!("Model path: {:?}", model_path);
         println!("Episodes trained: {}", metadata.episodes_trained);
         println!("Training steps: {}", metadata.training_steps);
-        println!("Grid size: {}x{}", metadata.grid_width, metadata.grid_height);
+        println!(
+            "Grid size: {}x{}",
+            metadata.grid_width, metadata.grid_height
+        );
         println!("Version: {}", metadata.version);
         println!("{}", "=".repeat(60));
         println!();
@@ -322,9 +321,7 @@ impl<B: Backend> VisualizeMode<B> {
             .expect("Failed to convert action probs to vec");
 
         let value_data = value.to_data();
-        let value_vec: Vec<f32> = value_data
-            .to_vec()
-            .expect("Failed to convert value to vec");
+        let value_vec: Vec<f32> = value_data.to_vec().expect("Failed to convert value to vec");
 
         // Store agent info for rendering
         self.agent_info = AgentInfo {
@@ -460,9 +457,7 @@ impl<B: Backend> VisualizeMode<B> {
         let pause_indicator = if self.paused {
             Span::styled(
                 " | PAUSED",
-                Style::default()
-                    .fg(Color::Red)
-                    .add_modifier(Modifier::BOLD),
+                Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
             )
         } else {
             Span::raw("")
@@ -675,9 +670,7 @@ impl<B: Backend> VisualizeMode<B> {
                     // Food
                     Span::styled(
                         "O ",
-                        Style::default()
-                            .fg(Color::Red)
-                            .add_modifier(Modifier::BOLD),
+                        Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
                     )
                 } else {
                     // Empty cell
@@ -730,9 +723,7 @@ fn argmax_action<B: Backend>(probs: &Tensor<B, 2>) -> usize {
     probs_vec
         .iter()
         .enumerate()
-        .max_by(|(_, a), (_, b)| {
-            a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal)
-        })
+        .max_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
         .map(|(idx, _)| idx)
         .unwrap_or(0)
 }
@@ -740,16 +731,28 @@ fn argmax_action<B: Backend>(probs: &Tensor<B, 2>) -> usize {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::rl::{default_device, InferenceBackend, TrainingBackend};
-    use crate::rl::{save_model, ActorCriticConfig, PPOAgent, PPOConfig};
+    use crate::rl::{ActorCriticConfig, PPOAgent, PPOConfig, save_model};
+    use crate::rl::{InferenceBackend, TrainingBackend, default_device};
     use tempfile::TempDir;
 
     #[test]
     fn test_visualization_speed() {
-        assert_eq!(VisualizationSpeed::Slow.tick_interval(), Duration::from_millis(500));
-        assert_eq!(VisualizationSpeed::Normal.tick_interval(), Duration::from_millis(125));
-        assert_eq!(VisualizationSpeed::Fast.tick_interval(), Duration::from_millis(50));
-        assert_eq!(VisualizationSpeed::VeryFast.tick_interval(), Duration::from_millis(16));
+        assert_eq!(
+            VisualizationSpeed::Slow.tick_interval(),
+            Duration::from_millis(500)
+        );
+        assert_eq!(
+            VisualizationSpeed::Normal.tick_interval(),
+            Duration::from_millis(125)
+        );
+        assert_eq!(
+            VisualizationSpeed::Fast.tick_interval(),
+            Duration::from_millis(50)
+        );
+        assert_eq!(
+            VisualizationSpeed::VeryFast.tick_interval(),
+            Duration::from_millis(16)
+        );
     }
 
     #[test]
@@ -758,10 +761,7 @@ mod tests {
 
         let device = default_device();
         // Create probabilities: [0.1, 0.6, 0.2, 0.1]
-        let probs = Tensor::<InferenceBackend, 2>::from_floats(
-            [[0.1, 0.6, 0.2, 0.1]],
-            &device,
-        );
+        let probs = Tensor::<InferenceBackend, 2>::from_floats([[0.1, 0.6, 0.2, 0.1]], &device);
 
         let action = argmax_action(&probs);
         assert_eq!(action, 1); // Index 1 has highest probability (0.6)
@@ -776,23 +776,13 @@ mod tests {
         let device = default_device();
         let network_config = ActorCriticConfig::new(10, 10);
         let network = network_config.init::<TrainingBackend>(&device);
-        let agent = PPOAgent::new(
-            network,
-            PPOConfig::default(),
-            10,
-            10,
-            device.clone(),
-        );
+        let agent = PPOAgent::new(network, PPOConfig::default(), 10, 10, device.clone());
 
         save_model(&agent, &model_path).unwrap();
 
         // Load in visualize mode
         let config = GameConfig::new(10, 10);
-        let visualize_mode = VisualizeMode::<InferenceBackend>::new(
-            &model_path,
-            config,
-            device,
-        );
+        let visualize_mode = VisualizeMode::<InferenceBackend>::new(&model_path, config, device);
 
         assert!(visualize_mode.is_ok());
         let mode = visualize_mode.unwrap();

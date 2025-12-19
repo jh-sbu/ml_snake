@@ -104,8 +104,8 @@ pub fn save_model<B: AutodiffBackend>(agent: &PPOAgent<B>, path: &Path) -> Resul
 
     // Save metadata as JSON
     let meta_path = path.with_extension("meta.json");
-    let meta_json = serde_json::to_string_pretty(&metadata)
-        .context("Failed to serialize metadata")?;
+    let meta_json =
+        serde_json::to_string_pretty(&metadata).context("Failed to serialize metadata")?;
     std::fs::write(&meta_path, meta_json)
         .with_context(|| format!("Failed to write metadata to {:?}", meta_path))?;
 
@@ -133,8 +133,8 @@ pub fn load_network<B: AutodiffBackend>(
     let meta_path = path.with_extension("meta.json");
     let meta_json = std::fs::read_to_string(&meta_path)
         .with_context(|| format!("Failed to read metadata from {:?}", meta_path))?;
-    let metadata: ModelMetadata = serde_json::from_str(&meta_json)
-        .context("Failed to deserialize metadata")?;
+    let metadata: ModelMetadata =
+        serde_json::from_str(&meta_json).context("Failed to deserialize metadata")?;
 
     // Reconstruct network from metadata
     let network_config = ActorCriticConfig::new(metadata.grid_height, metadata.grid_width);
@@ -154,7 +154,7 @@ pub fn load_network<B: AutodiffBackend>(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::rl::{default_device, TrainingBackend};
+    use crate::rl::{TrainingBackend, default_device};
     use tempfile::TempDir;
 
     #[test]

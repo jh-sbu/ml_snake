@@ -37,3 +37,4 @@ tracing-subscriber = "0.3"
 
 [dev-dependencies]
 approx = "0.5"  # For floating-point comparisons in tests
+tempfile = "3.0"  # For temporary directories in tests

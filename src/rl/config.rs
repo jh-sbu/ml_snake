@@ -141,10 +141,7 @@ impl PPOConfig {
         }
 
         if !(0.0..=1.0).contains(&self.gamma) {
-            return Err(format!(
-                "gamma must be in [0, 1], got {}",
-                self.gamma
-            ));
+            return Err(format!("gamma must be in [0, 1], got {}", self.gamma));
         }
 
         if !(0.0..=1.0).contains(&self.gae_lambda) {

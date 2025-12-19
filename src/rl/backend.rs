@@ -25,8 +25,8 @@
 //! ```
 
 use burn::backend::{
-    ndarray::{NdArray, NdArrayDevice},
     Autodiff,
+    ndarray::{NdArray, NdArrayDevice},
 };
 
 /// Backend type for training (with autodiff)

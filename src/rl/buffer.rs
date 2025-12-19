@@ -4,7 +4,7 @@
 //! environment interaction and computing advantages using Generalized Advantage
 //! Estimation (GAE).
 
-use burn::tensor::{backend::Backend, Int, Tensor};
+use burn::tensor::{Int, Tensor, backend::Backend};
 use rand::seq::SliceRandom;
 
 /// Experience buffer for storing rollout data during PPO training
@@ -261,11 +261,7 @@ impl<B: Backend> RolloutBuffer<B> {
 
         // Normalize advantages: (A - mean(A)) / (std(A) + 1e-8)
         let mean = advantages.iter().sum::<f32>() / n as f32;
-        let variance = advantages
-            .iter()
-            .map(|a| (a - mean).powi(2))
-            .sum::<f32>()
-            / n as f32;
+        let variance = advantages.iter().map(|a| (a - mean).powi(2)).sum::<f32>() / n as f32;
         let std = variance.sqrt();
 
         for a in &mut advantages {
@@ -342,8 +338,7 @@ impl<B: Backend> RolloutBuffer<B> {
 
         // Create actions tensor
         let actions_data: Vec<i32> = indices.iter().map(|&i| self.actions[i] as i32).collect();
-        let actions_tensor =
-            Tensor::<B, 1, Int>::from_ints(actions_data.as_slice(), &self.device);
+        let actions_tensor = Tensor::<B, 1, Int>::from_ints(actions_data.as_slice(), &self.device);
 
         // Create log_probs tensor
         let log_probs_data: Vec<f32> = indices.iter().map(|&i| self.log_probs[i]).collect();
@@ -595,11 +590,8 @@ mod tests {
 
         // Check normalization
         let mean: f32 = advantages.iter().sum::<f32>() / advantages.len() as f32;
-        let variance: f32 = advantages
-            .iter()
-            .map(|a| (a - mean).powi(2))
-            .sum::<f32>()
-            / advantages.len() as f32;
+        let variance: f32 =
+            advantages.iter().map(|a| (a - mean).powi(2)).sum::<f32>() / advantages.len() as f32;
         let std = variance.sqrt();
 
         assert!(mean.abs() < 1e-5); // Mean should be approximately 0

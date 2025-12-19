@@ -10,9 +10,9 @@ use burn::{
     module::AutodiffModule,
     optim::{Adam, AdamConfig, GradientsParams, Optimizer, adaptor::OptimizerAdaptor},
     tensor::{
+        ElementConversion, Int, Tensor,
         activation::{log_softmax, softmax},
         backend::AutodiffBackend,
-        ElementConversion, Int, Tensor,
     },
 };
 use rand::Rng;
@@ -102,9 +102,7 @@ impl<B: AutodiffBackend> PPOAgent<B> {
         device: B::Device,
     ) -> Self {
         // Validate config
-        config
-            .validate()
-            .expect("Invalid PPO configuration");
+        config.validate().expect("Invalid PPO configuration");
 
         // Create optimizer
         let optim = AdamConfig::new().init();
@@ -140,10 +138,7 @@ impl<B: AutodiffBackend> PPOAgent<B> {
     /// - `action` - Discrete action index
     /// - `log_prob` - Log probability of the selected action
     /// - `value` - Value estimate V(s)
-    pub fn select_action(
-        &self,
-        observation: Tensor<B::InnerBackend, 3>,
-    ) -> (usize, f32, f32) {
+    pub fn select_action(&self, observation: Tensor<B::InnerBackend, 3>) -> (usize, f32, f32) {
         let device = observation.device();
 
         // Add batch dimension
@@ -159,10 +154,8 @@ impl<B: AutodiffBackend> PPOAgent<B> {
 
         // Compute log probability of selected action
         let log_probs = log_softmax(action_logits, 1);
-        let action_tensor = Tensor::<B::InnerBackend, 1, Int>::from_ints(
-            [action_idx as i32],
-            &device,
-        );
+        let action_tensor =
+            Tensor::<B::InnerBackend, 1, Int>::from_ints([action_idx as i32], &device);
         let log_prob = log_probs
             .gather(1, action_tensor.unsqueeze_dim(1))
             .squeeze::<1>(1)
@@ -269,18 +262,13 @@ impl<B: AutodiffBackend> PPOAgent<B> {
                 let (action_logits, values) = self.network.forward(obs);
 
                 // Compute losses
-                let (policy_loss, entropy) = self.compute_policy_loss(
-                    &action_logits,
-                    &actions,
-                    &old_log_probs,
-                    &advantages,
-                );
+                let (policy_loss, entropy) =
+                    self.compute_policy_loss(&action_logits, &actions, &old_log_probs, &advantages);
 
                 let value_loss = self.compute_value_loss(&values, &returns);
 
                 // Total loss: L_policy - c_entropy * H + c_value * L_value
-                let total_loss = policy_loss.clone()
-                    - entropy.clone() * self.config.entropy_coef
+                let total_loss = policy_loss.clone() - entropy.clone() * self.config.entropy_coef
                     + value_loss.clone() * self.config.value_coef;
 
                 // Backward pass
@@ -288,7 +276,9 @@ impl<B: AutodiffBackend> PPOAgent<B> {
 
                 // Update network parameters
                 let grads = GradientsParams::from_grads(grads, &self.network);
-                self.network = self.optim.step(self.config.learning_rate, self.network.clone(), grads);
+                self.network =
+                    self.optim
+                        .step(self.config.learning_rate, self.network.clone(), grads);
 
                 // Accumulate losses (convert to scalars)
                 total_policy_loss += policy_loss.into_scalar().elem::<f32>();
@@ -450,11 +440,11 @@ fn sample_categorical<B: burn::tensor::backend::Backend>(probs: &Tensor<B, 2>) -
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::rl::{ActorCriticConfig, SnakeEnvironment};
     use crate::game::GameConfig;
+    use crate::rl::{ActorCriticConfig, SnakeEnvironment};
     use burn::backend::{
-        ndarray::{NdArray, NdArrayDevice},
         Autodiff,
+        ndarray::{NdArray, NdArrayDevice},
     };
 
     type TestBackend = Autodiff<NdArray<f32>>;
@@ -570,12 +560,8 @@ mod tests {
         let old_log_probs = Tensor::from_floats([-1.5], &device);
         let advantages = Tensor::from_floats([0.5], &device);
 
-        let (policy_loss, entropy) = agent.compute_policy_loss(
-            &action_logits,
-            &actions,
-            &old_log_probs,
-            &advantages,
-        );
+        let (policy_loss, entropy) =
+            agent.compute_policy_loss(&action_logits, &actions, &old_log_probs, &advantages);
 
         // Loss should be a scalar (single element)
         assert_eq!(policy_loss.dims().len(), 1);

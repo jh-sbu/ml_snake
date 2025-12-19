@@ -4,6 +4,7 @@ use super::{
     state::{CollisionType, GameState, Position, Snake},
 };
 use rand::Rng;
+use std::collections::HashSet;
 
 /// Information about a step
 #[derive(Debug, Clone, PartialEq)]
@@ -142,15 +143,51 @@ impl GameEngine {
     }
 
     /// Spawn food at a random empty position
+    /// Uses adaptive strategy: random sampling for sparse boards, deterministic for dense boards
     fn spawn_food_avoid_snake(&mut self, snake: &Snake) -> Position {
-        loop {
-            let x = self.rng.gen_range(0..self.config.grid_width) as i32;
-            let y = self.rng.gen_range(0..self.config.grid_height) as i32;
-            let pos = Position::new(x, y);
+        let grid_size = (self.config.grid_width * self.config.grid_height) as i32;
+        let snake_size = snake.len() as i32;
+        let occupancy_ratio = snake_size as f32 / grid_size as f32;
 
-            if !snake.body.contains(&pos) {
-                return pos;
+        // Strategy 1: Random sampling for sparse boards (< 70% occupancy)
+        if occupancy_ratio < 0.7 {
+            const MAX_ATTEMPTS: usize = 1000;
+            for _ in 0..MAX_ATTEMPTS {
+                let x = self.rng.gen_range(0..self.config.grid_width) as i32;
+                let y = self.rng.gen_range(0..self.config.grid_height) as i32;
+                let pos = Position::new(x, y);
+
+                if !snake.body.contains(&pos) {
+                    return pos;
+                }
             }
+        }
+
+        // Strategy 2: Deterministic collection for dense boards (≥ 70% occupancy)
+        // Build HashSet for O(1) lookups instead of O(n) Vec::contains
+        let snake_set: HashSet<_> = snake.body.iter().copied().collect();
+
+        let mut empty_positions = Vec::new();
+        for y in 0..self.config.grid_height {
+            for x in 0..self.config.grid_width {
+                let pos = Position::new(x as i32, y as i32);
+                if !snake_set.contains(&pos) {
+                    empty_positions.push(pos);
+                }
+            }
+        }
+
+        if empty_positions.is_empty() {
+            // Board completely full - return center as safe fallback
+            // Game should have ended; this prevents panic during RL training
+            Position::new(
+                (self.config.grid_width / 2) as i32,
+                (self.config.grid_height / 2) as i32,
+            )
+        } else {
+            // Randomly select from available empty positions
+            let idx = self.rng.gen_range(0..empty_positions.len());
+            empty_positions[idx]
         }
     }
 }
@@ -269,5 +306,101 @@ mod tests {
 
         assert!(result.terminated);
         assert_eq!(state.steps, steps_before); // Should not increment
+    }
+
+    #[test]
+    fn test_spawn_food_never_collides_with_snake() {
+        let mut engine = GameEngine::new(GameConfig::small());
+        let snake = Snake::new(Position::new(5, 5), Direction::Right, 3);
+
+        // Spawn food 100 times - should never collide
+        for _ in 0..100 {
+            let food = engine.spawn_food_avoid_snake(&snake);
+            assert!(!snake.body.contains(&food));
+            assert!(food.x >= 0 && food.x < 10);
+            assert!(food.y >= 0 && food.y < 10);
+        }
+    }
+
+    #[test]
+    fn test_spawn_food_with_large_snake() {
+        let mut engine = GameEngine::new(GameConfig::small());
+
+        // Create snake filling 80% of 10×10 grid (80 cells)
+        let mut body = Vec::new();
+        for y in 0..8 {
+            for x in 0..10 {
+                body.push(Position::new(x, y));
+            }
+        }
+        let mut snake = Snake::new(Position::new(0, 0), Direction::Right, 3);
+        snake.body = body;
+
+        // Should still spawn in remaining 20 cells
+        for _ in 0..20 {
+            let food = engine.spawn_food_avoid_snake(&snake);
+            assert!(!snake.body.contains(&food));
+        }
+    }
+
+    #[test]
+    fn test_spawn_food_nearly_full_board() {
+        let mut engine = GameEngine::new(GameConfig::small());
+
+        // Fill all but one cell (99 of 100 cells)
+        let mut body = Vec::new();
+        for y in 0..10 {
+            for x in 0..10 {
+                if !(x == 9 && y == 9) {
+                    body.push(Position::new(x, y));
+                }
+            }
+        }
+        let mut snake = Snake::new(Position::new(0, 0), Direction::Right, 3);
+        snake.body = body;
+
+        // Should always spawn at the only available position (9, 9)
+        let food = engine.spawn_food_avoid_snake(&snake);
+        assert_eq!(food, Position::new(9, 9));
+    }
+
+    #[test]
+    fn test_spawn_food_completely_full_board() {
+        let mut engine = GameEngine::new(GameConfig::small());
+
+        // Fill entire 10×10 board (100 cells)
+        let mut body = Vec::new();
+        for y in 0..10 {
+            for x in 0..10 {
+                body.push(Position::new(x, y));
+            }
+        }
+        let mut snake = Snake::new(Position::new(0, 0), Direction::Right, 3);
+        snake.body = body;
+
+        // Should not panic - returns fallback position
+        let food = engine.spawn_food_avoid_snake(&snake);
+        assert!(food.x >= 0 && food.x < 10);
+        assert!(food.y >= 0 && food.y < 10);
+    }
+
+    #[test]
+    fn test_spawn_food_distribution_fairness() {
+        let mut engine = GameEngine::new(GameConfig::small());
+        let snake = Snake::new(Position::new(5, 5), Direction::Right, 3);
+
+        use std::collections::HashMap;
+        let mut position_counts = HashMap::new();
+
+        // Spawn 1000 times and verify no single position dominates
+        for _ in 0..1000 {
+            let food = engine.spawn_food_avoid_snake(&snake);
+            *position_counts.entry(food).or_insert(0) += 1;
+        }
+
+        // With 97 available cells, no position should appear >10% of time
+        for count in position_counts.values() {
+            assert!(*count < 100);
+        }
     }
 }
