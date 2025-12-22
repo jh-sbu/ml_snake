@@ -146,3 +146,95 @@ To use the GPU backend, ensure you have:
 - **Windows**: DirectX 12 or Vulkan support
 
 If GPU is not available or initialization fails, the auto-detection will gracefully fall back to CPU.
+
+## Performance Metrics
+
+The project includes comprehensive performance metrics for identifying bottlenecks during development and optimization.
+
+### Enabling Performance Metrics
+
+```bash
+# Enable basic performance metrics (coarse-grained)
+cargo run --release -- --mode train --episodes 1000 --perf
+
+# Enable detailed metrics with fine-grained timing (higher overhead)
+cargo run --release -- --mode train --episodes 1000 --perf --perf-fine-grained
+
+# Export metrics to CSV for analysis
+cargo run --release -- --mode train --episodes 1000 --perf --perf-output metrics.csv
+
+# Combine all options
+cargo run --release -- --mode train --episodes 1000 --perf --perf-fine-grained --perf-output metrics.csv
+```
+
+### Metrics Collected
+
+**Coarse-grained metrics** (always collected when `--perf` enabled):
+- **Episode Loop**: Total time per episode including all operations
+- **PPO Update**: Full PPO update cycle (GAE computation + gradient updates)
+- **Model Save**: Checkpoint and final model save operations
+
+**Fine-grained metrics** (only with `--perf-fine-grained`):
+- **Network Forward**: Individual neural network forward passes
+- **Network Backward**: Gradient computation (backward pass)
+- **Observation Create**: Observation tensor creation time
+- **Batch Retrieval**: Retrieving batch data from replay buffer
+- **GAE Computation**: Advantage estimation calculations
+
+### Performance Output
+
+**During Training** (every log_frequency episodes):
+```
+[12:34:56] [Elapsed: 00:15:23] [Episode 1000/10000]
+  Episodes: 1000 | Steps: 150432 | Reward: 15.50 | Score: 5.00 | ...
+
+  Performance (last 100):
+    Episode:           avg=42.3ms  min=35.1ms  max=58.7ms  (23.6/s)
+    PPO Update:        avg=156.2ms min=142.8ms max=178.4ms (6.4/s)
+    Network Forward:   avg=8.4ms   min=7.2ms   max=12.1ms  (119.0/s)
+```
+
+**Final Summary** (at training completion):
+```
+======================================================================
+Performance Metrics:
+======================================================================
+Operation Breakdown:
+  Episode:           avg=42.1ms   count=10000  total=7m01s   (31.1%)
+  PPO Update:        avg=158.3ms  count=2048   total=5m24s   (23.9%)
+  Network Forward:   avg=8.3ms    count=50000  total=6m55s   (30.6%)
+  Model Save:        avg=245.8ms  count=10     total=2.5s    (0.2%)
+
+Throughput:
+  Episode:           23.7 ops/sec
+  PPO Update:        6.3 ops/sec
+  Network Forward:   120.5 ops/sec
+  Model Save:        4.1 ops/sec
+
+Total time measured: 22m38s
+======================================================================
+```
+
+**CSV Export Format**:
+```csv
+timestamp,metric,count,total_ms,avg_ms,min_ms,max_ms,throughput
+2025-12-22T12:34:56,Episode,10000,421340.5,42.1,35.1,58.7,23.7
+2025-12-22T12:34:56,PpoUpdate,2048,324198.2,158.3,142.8,178.4,6.3
+2025-12-22T12:34:56,NetworkForward,50000,415000.0,8.3,7.2,12.1,120.5
+```
+
+### Performance Overhead
+
+- **Disabled** (default): 0% overhead
+- **Coarse-grained** (`--perf`): <1% overhead (~10-15 timings per episode)
+- **Fine-grained** (`--perf --perf-fine-grained`): 2-5% overhead (hundreds of timings per episode)
+
+Fine-grained metrics are recommended only for development and bottleneck analysis, not for production training runs.
+
+### Use Cases
+
+1. **Identify Bottlenecks**: Find which operations consume the most time
+2. **Backend Comparison**: Compare CPU vs GPU performance with concrete metrics
+3. **Optimization Validation**: Measure impact of code optimizations
+4. **Batch Size Tuning**: Understand relationship between batch size and throughput
+5. **Development Profiling**: Track performance during feature development

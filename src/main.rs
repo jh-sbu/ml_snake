@@ -55,6 +55,19 @@ struct Cli {
     /// GPU device ID (0 = first discrete GPU, 1 = second, etc.)
     #[arg(long)]
     gpu_device: Option<usize>,
+
+    // Performance metrics arguments
+    /// Enable performance metrics collection (train mode only)
+    #[arg(long)]
+    perf: bool,
+
+    /// Enable fine-grained performance metrics - higher overhead (train mode only)
+    #[arg(long)]
+    perf_fine_grained: bool,
+
+    /// Path to export performance metrics as CSV (train mode only)
+    #[arg(long)]
+    perf_output: Option<PathBuf>,
 }
 
 #[derive(Clone, ValueEnum)]
@@ -149,6 +162,9 @@ fn run_train_cpu(cli: &Cli, config: GameConfig) -> Result<()> {
     train_config.max_steps_per_episode = cli.max_steps;
     train_config.game_config = config;
     train_config.ppo_config = PPOConfig::default(); // batch_size=32 for CPU
+    train_config.perf_metrics_enabled = cli.perf;
+    train_config.perf_fine_grained = cli.perf_fine_grained;
+    train_config.perf_output_path = cli.perf_output.clone();
 
     let mut train_mode = TrainMode::<cpu::TrainingBackend>::new(train_config, device);
     train_mode.run()
@@ -171,6 +187,9 @@ fn run_train_gpu(cli: &Cli, config: GameConfig) -> Result<()> {
         update_frequency: 4096, // vs 2048 on CPU
         ..Default::default()
     };
+    train_config.perf_metrics_enabled = cli.perf;
+    train_config.perf_fine_grained = cli.perf_fine_grained;
+    train_config.perf_output_path = cli.perf_output.clone();
 
     let mut train_mode = TrainMode::<gpu::TrainingBackend>::new(train_config, device);
     train_mode.run()

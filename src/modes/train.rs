@@ -32,7 +32,7 @@ use std::path::{Path, PathBuf};
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
 use crate::game::GameConfig;
-use crate::metrics::TrainingStats;
+use crate::metrics::{PerformanceMetrics, TimingKey, TrainingStats};
 use crate::rl::{ActorCriticConfig, PPOAgent, PPOConfig, SnakeEnvironment, save_model};
 
 /// Configuration for training mode
@@ -58,6 +58,15 @@ pub struct TrainConfig {
 
     /// PPO hyperparameters
     pub ppo_config: PPOConfig,
+
+    /// Enable performance metrics collection
+    pub perf_metrics_enabled: bool,
+
+    /// Enable fine-grained performance metrics (higher overhead)
+    pub perf_fine_grained: bool,
+
+    /// Optional path to export performance metrics as CSV
+    pub perf_output_path: Option<PathBuf>,
 }
 
 impl TrainConfig {
@@ -85,6 +94,9 @@ impl TrainConfig {
             max_steps_per_episode: 1000,
             game_config: GameConfig::default(),
             ppo_config: PPOConfig::default(),
+            perf_metrics_enabled: false,
+            perf_fine_grained: false,
+            perf_output_path: None,
         }
     }
 }
@@ -102,6 +114,9 @@ pub struct TrainMode<B: AutodiffBackend> {
 
     /// Training statistics tracker
     stats: TrainingStats,
+
+    /// Performance metrics tracker
+    perf_metrics: PerformanceMetrics,
 
     /// Training configuration
     config: TrainConfig,
@@ -157,10 +172,17 @@ impl<B: AutodiffBackend> TrainMode<B> {
         // Initialize stats tracker (100-episode rolling window)
         let stats = TrainingStats::new(100);
 
+        // Initialize performance metrics tracker
+        let perf_metrics = PerformanceMetrics::new(
+            config.perf_metrics_enabled,
+            config.perf_fine_grained,
+        );
+
         Self {
             agent,
             env,
             stats,
+            perf_metrics,
             config,
             current_episode: 0,
             total_steps: 0,
@@ -223,6 +245,21 @@ impl<B: AutodiffBackend> TrainMode<B> {
         println!("Final model saved to: {:?}", self.config.save_path);
         println!("\nFinal Statistics:");
         println!("{}", self.stats.format_summary());
+
+        // Print detailed performance metrics if enabled
+        if self.config.perf_metrics_enabled {
+            println!("\n{}", "=".repeat(70));
+            println!("Performance Metrics:");
+            println!("{}", "=".repeat(70));
+            println!("{}", self.perf_metrics.format_detailed());
+
+            // Export to CSV if path provided
+            if let Some(ref path) = self.config.perf_output_path {
+                self.perf_metrics.export_csv(path)?;
+                println!("\nPerformance metrics exported to: {:?}", path);
+            }
+        }
+
         println!("{}", "=".repeat(70));
 
         Ok(())
@@ -244,14 +281,21 @@ impl<B: AutodiffBackend> TrainMode<B> {
     /// - Number of steps in the episode
     /// - Final score (food eaten)
     fn run_episode(&mut self) -> Result<(f32, usize, u32)> {
+        let _episode_timer = self.perf_metrics.start_scope(TimingKey::Episode);
+
         let mut obs = self.env.reset();
         let mut episode_reward = 0.0;
         let mut episode_steps = 0;
         let mut done = false;
 
         while !done && episode_steps < self.config.max_steps_per_episode {
-            // Select action
-            let (action, log_prob, value) = self.agent.select_action(obs.clone());
+            // Select action (optionally timed for fine-grained metrics)
+            let (action, log_prob, value) = if self.config.perf_fine_grained {
+                let _timer = self.perf_metrics.start_scope(TimingKey::NetworkForward);
+                self.agent.select_action(obs.clone())
+            } else {
+                self.agent.select_action(obs.clone())
+            };
 
             // Step environment
             let (next_obs, reward, terminated) = self.env.step(action);
@@ -269,6 +313,8 @@ impl<B: AutodiffBackend> TrainMode<B> {
 
             // PPO update if buffer is full
             if self.agent.should_update() {
+                let _update_timer = self.perf_metrics.start_scope(TimingKey::PpoUpdate);
+
                 // Get last value for bootstrapping
                 let (_, _, last_value) = self.agent.select_action(obs.clone());
 
@@ -287,7 +333,9 @@ impl<B: AutodiffBackend> TrainMode<B> {
     }
 
     /// Save a checkpoint of the current model
-    fn save_checkpoint(&self) -> Result<()> {
+    fn save_checkpoint(&mut self) -> Result<()> {
+        let _timer = self.perf_metrics.start_scope(TimingKey::ModelSave);
+
         let checkpoint_path = self
             .config
             .save_path
@@ -304,7 +352,9 @@ impl<B: AutodiffBackend> TrainMode<B> {
     }
 
     /// Save the final trained model
-    fn save_model(&self) -> Result<()> {
+    fn save_model(&mut self) -> Result<()> {
+        let _timer = self.perf_metrics.start_scope(TimingKey::ModelSave);
+
         save_model(&self.agent, &self.config.save_path).with_context(|| {
             format!("Failed to save final model to {:?}", self.config.save_path)
         })?;
@@ -360,6 +410,11 @@ impl<B: AutodiffBackend> TrainMode<B> {
             self.config.num_episodes,
             self.stats.format_summary()
         );
+
+        // Print performance metrics if enabled and we have enough data
+        if self.config.perf_metrics_enabled && episode >= self.config.log_frequency {
+            println!("\n  {}\n", self.perf_metrics.format_summary());
+        }
     }
 
     /// Format current timestamp as HH:MM:SS
