@@ -158,12 +158,12 @@ impl<B: AutodiffBackend> PPOAgent<B> {
             Tensor::<B::InnerBackend, 1, Int>::from_ints([action_idx as i32], &device);
         let log_prob = log_probs
             .gather(1, action_tensor.unsqueeze_dim(1))
-            .squeeze::<1>(1)
+            .squeeze_dim::<1>(1)
             .into_scalar()
             .elem::<f32>();
 
         // Extract value estimate
-        let value_scalar = value.squeeze::<1>(1).into_scalar().elem::<f32>();
+        let value_scalar = value.squeeze_dim::<1>(1).into_scalar().elem::<f32>();
 
         (action_idx, log_prob, value_scalar)
     }
@@ -323,7 +323,7 @@ impl<B: AutodiffBackend> PPOAgent<B> {
         let log_probs = log_softmax(action_logits.clone(), 1);
         let new_log_probs = log_probs
             .gather(1, actions.clone().unsqueeze_dim(1))
-            .squeeze(1);
+            .squeeze_dim::<1>(1);
 
         // Compute probability ratio: r = exp(log π_new - log π_old)
         let ratio = (new_log_probs.clone() - old_log_probs.clone()).exp();
@@ -360,7 +360,7 @@ impl<B: AutodiffBackend> PPOAgent<B> {
     ///
     /// Value loss (scalar)
     fn compute_value_loss(&self, values: &Tensor<B, 2>, returns: &Tensor<B, 1>) -> Tensor<B, 1> {
-        let values = values.clone().squeeze(1); // [batch]
+        let values = values.clone().squeeze_dim::<1>(1); // [batch]
         let diff = values - returns.clone();
         (diff.clone() * diff).mean()
     }

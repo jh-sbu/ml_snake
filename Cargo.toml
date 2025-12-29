@@ -5,9 +5,9 @@ edition = "2024"
 
 [dependencies]
 # Core ML framework
-burn = { version = "0.16", features = ["train", "wgpu", "ndarray"] }
-burn-tensor = "0.16"
-burn-autodiff = "0.16"
+burn = { version = "0.19", features = ["train", "wgpu", "ndarray"] }
+burn-tensor = "0.19"
+burn-autodiff = "0.19"
 
 # Terminal UI
 ratatui = "0.29"
