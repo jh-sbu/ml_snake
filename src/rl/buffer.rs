@@ -312,6 +312,10 @@ impl<B: Backend> RolloutBuffer<B> {
             .expect("Returns must be computed before getting batches");
 
         // Build observation batch using iterative concatenation
+        // TODO(optimization): Replace with Tensor::stack when available in Burn 0.20+
+        // Current O(n) iterative concat is acceptable for batch_size ≤ 128.
+        // For batch_size=64 (current GPU default), overhead is negligible.
+        //
         // While theoretically O(n²), this approach has lower constant factors than Tensor::stack
         // for the typical batch sizes (64-128) and observation dimensions ([4, 20, 20]) in this application.
         // The overhead of Tensor::stack (unsqueeze operations, validation, intermediate Vec allocations)

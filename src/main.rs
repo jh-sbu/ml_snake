@@ -68,6 +68,15 @@ struct Cli {
     /// Path to export performance metrics as CSV (train mode only)
     #[arg(long)]
     perf_output: Option<PathBuf>,
+
+    // PPO hyperparameter overrides (train mode only)
+    /// Minibatch size for PPO updates (train mode only)
+    #[arg(long)]
+    batch_size: Option<usize>,
+
+    /// Steps to collect before PPO update (train mode only)
+    #[arg(long)]
+    update_frequency: Option<usize>,
 }
 
 #[derive(Clone, ValueEnum)]
@@ -161,7 +170,15 @@ fn run_train_cpu(cli: &Cli, config: GameConfig) -> Result<()> {
     train_config.log_frequency = cli.log_freq;
     train_config.max_steps_per_episode = cli.max_steps;
     train_config.game_config = config;
-    train_config.ppo_config = PPOConfig::default(); // batch_size=32 for CPU
+    // Apply default PPOConfig with optional CLI overrides
+    let mut ppo_config = PPOConfig::default();
+    if let Some(bs) = cli.batch_size {
+        ppo_config.batch_size = bs;
+    }
+    if let Some(uf) = cli.update_frequency {
+        ppo_config.update_frequency = uf;
+    }
+    train_config.ppo_config = ppo_config;
     train_config.perf_metrics_enabled = cli.perf;
     train_config.perf_fine_grained = cli.perf_fine_grained;
     train_config.perf_output_path = cli.perf_output.clone();
@@ -181,12 +198,21 @@ fn run_train_gpu(cli: &Cli, config: GameConfig) -> Result<()> {
     train_config.log_frequency = cli.log_freq;
     train_config.max_steps_per_episode = cli.max_steps;
     train_config.game_config = config;
-    // Auto-adjust batch size for GPU for better utilization
-    train_config.ppo_config = PPOConfig {
-        batch_size: 256,        // vs 32 on CPU
-        update_frequency: 4096, // vs 2048 on CPU
+    // GPU-optimized batch sizes suitable for laptop GPUs (2-4 GB VRAM)
+    // For high-end GPUs, use --batch-size and --update-frequency flags
+    let mut ppo_config = PPOConfig {
+        batch_size: 64,         // Laptop GPU safe: 2x CPU, 4x less than previous
+        update_frequency: 2048, // Same as CPU baseline (proven stable)
         ..Default::default()
     };
+    // Apply CLI overrides if provided
+    if let Some(bs) = cli.batch_size {
+        ppo_config.batch_size = bs;
+    }
+    if let Some(uf) = cli.update_frequency {
+        ppo_config.update_frequency = uf;
+    }
+    train_config.ppo_config = ppo_config;
     train_config.perf_metrics_enabled = cli.perf;
     train_config.perf_fine_grained = cli.perf_fine_grained;
     train_config.perf_output_path = cli.perf_output.clone();

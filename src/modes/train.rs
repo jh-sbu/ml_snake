@@ -99,6 +99,88 @@ impl TrainConfig {
             perf_output_path: None,
         }
     }
+
+    /// Validate training configuration
+    ///
+    /// Checks that PPO config is valid and warns about memory-intensive settings.
+    ///
+    /// # Returns
+    ///
+    /// `Ok(())` if configuration is valid, `Err` with detailed message otherwise.
+    pub fn validate(&self) -> Result<()> {
+        // Validate PPO config
+        self.ppo_config
+            .validate()
+            .map_err(|e| anyhow::anyhow!("Invalid PPO configuration: {}", e))?;
+
+        // Warn about memory-intensive configurations
+        let buffer_memory_mb = estimate_buffer_memory_mb(
+            self.ppo_config.update_frequency,
+            self.game_config.grid_height,
+            self.game_config.grid_width,
+        );
+
+        if buffer_memory_mb > 500.0 {
+            eprintln!(
+                "WARNING: Replay buffer will use ~{:.0} MB of memory",
+                buffer_memory_mb
+            );
+            eprintln!(
+                "  This may cause GPU memory allocation errors on systems with limited VRAM."
+            );
+            eprintln!(
+                "  Consider using smaller --update-frequency (current: {})",
+                self.ppo_config.update_frequency
+            );
+        }
+
+        let batch_memory_mb = estimate_batch_memory_mb(
+            self.ppo_config.batch_size,
+            self.game_config.grid_height,
+            self.game_config.grid_width,
+        );
+
+        if batch_memory_mb > 50.0 {
+            eprintln!(
+                "WARNING: Each training batch will use ~{:.0} MB of GPU memory",
+                batch_memory_mb
+            );
+            eprintln!("  This may cause errors on GPUs with less than 4 GB VRAM.");
+            eprintln!(
+                "  Consider using smaller --batch-size (current: {})",
+                self.ppo_config.batch_size
+            );
+        }
+
+        Ok(())
+    }
+}
+
+/// Estimate memory usage of replay buffer in MB
+fn estimate_buffer_memory_mb(capacity: usize, height: usize, width: usize) -> f32 {
+    // Each transition stores:
+    // - observation: [4, H, W] f32
+    // - action: usize
+    // - log_prob: f32
+    // - reward: f32
+    // - value: f32
+    // - done: bool
+    // - advantage: f32 (after GAE)
+    // - return: f32 (after GAE)
+
+    let obs_bytes = 4 * height * width * 4; // [4, H, W] × f32 (4 bytes)
+    let metadata_bytes = 8 + 4 + 4 + 4 + 1 + 4 + 4; // Other fields
+    let bytes_per_transition = obs_bytes + metadata_bytes;
+    let total_bytes = capacity * bytes_per_transition;
+
+    total_bytes as f32 / (1024.0 * 1024.0)
+}
+
+/// Estimate memory usage of a single batch in MB
+fn estimate_batch_memory_mb(batch_size: usize, height: usize, width: usize) -> f32 {
+    // Batch tensor: [batch_size, 4, H, W] f32
+    let batch_bytes = batch_size * 4 * height * width * 4;
+    batch_bytes as f32 / (1024.0 * 1024.0)
 }
 
 /// Training mode for PPO agent
@@ -207,6 +289,9 @@ impl<B: AutodiffBackend> TrainMode<B> {
     /// ```
     pub fn run(&mut self) -> Result<()> {
         self.print_header();
+
+        // Validate configuration before starting training
+        self.config.validate()?;
 
         for episode in 0..self.config.num_episodes {
             self.current_episode = episode;

@@ -108,16 +108,17 @@ cargo run --release -- --mode train --backend gpu --gpu-device 0
 **CPU Backend (NdArray)**
 - Works on all systems
 - No additional dependencies
-- Optimized batch size: 32
-- Update frequency: 2048 steps
+- Default batch size: 64
+- Default update frequency: 2048 steps
 
 **GPU Backend (Wgpu)**
 - Cross-platform GPU support (NVIDIA, AMD, Intel)
 - Requires up-to-date graphics drivers
 - Requires Vulkan (Linux/Windows), Metal (macOS), or DirectX 12 (Windows)
-- Optimized batch size: 256 (8x larger for better GPU utilization)
-- Update frequency: 4096 steps (2x larger)
-- Expected speedup: 3-6x faster training
+- Default batch size: 64 (laptop GPU safe, 2-4 GB VRAM)
+- Default update frequency: 2048 steps
+- Expected speedup: 2-4x faster training vs CPU
+- Can be tuned for high-end GPUs using CLI flags (see Batch Size Configuration below)
 
 ### Cross-Backend Compatibility
 
@@ -146,6 +147,38 @@ To use the GPU backend, ensure you have:
 - **Windows**: DirectX 12 or Vulkan support
 
 If GPU is not available or initialization fails, the auto-detection will gracefully fall back to CPU.
+
+### Batch Size Configuration
+
+The project automatically selects safe batch sizes suitable for most laptop GPUs. You can override these for your specific hardware:
+
+**Default Batch Sizes:**
+- CPU: `batch_size=64, update_frequency=2048`
+- GPU: `batch_size=64, update_frequency=2048` (laptop GPU safe, 2-4 GB VRAM)
+
+**Override for High-End GPUs (8+ GB VRAM):**
+```bash
+# Use larger batches for better GPU utilization on high-end hardware
+cargo run --release -- --mode train --backend gpu \
+  --batch-size 256 --update-frequency 4096 --episodes 10000
+```
+
+**Conservative Settings for Low-End GPUs (2 GB VRAM):**
+```bash
+# Use smaller batches for GPUs with limited memory
+cargo run --release -- --mode train --backend gpu \
+  --batch-size 32 --update-frequency 1024 --episodes 10000
+```
+
+**Memory Estimation:**
+- Buffer memory ≈ update_frequency × grid_size × 16 bytes
+- Batch memory ≈ batch_size × grid_size × 16 bytes
+- Example (20×20 grid):
+  - `update_frequency=2048`: ~52 MB buffer
+  - `batch_size=64`: ~1.6 MB per batch
+  - `batch_size=256`: ~6.4 MB per batch
+
+The training mode will warn you before starting if your configuration may exceed available GPU memory.
 
 ## Performance Metrics
 
